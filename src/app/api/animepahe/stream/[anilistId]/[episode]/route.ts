@@ -245,10 +245,10 @@ async function formatStreams(data: any) {
                 ? await extractM3U8FromIframe(iframe)
                 : null;
 
-            if (stream) {
+            if (stream || iframe) {
                 sub.push({
                     quality: q,
-                    stream: `https://workers.dev/?url=${encodeURIComponent(stream)}`,
+                    stream: `https://workers.dev/?url=${encodeURIComponent(stream || iframe)}`,
                     iframe: iframe,
                     download:
                         data?.["Kiwi-Stream"]?.sub?.download?.[key] || null,
@@ -264,10 +264,10 @@ async function formatStreams(data: any) {
                 ? await extractM3U8FromIframe(iframe)
                 : null;
 
-            if (stream) {
+            if (stream || iframe) {
                 dub.push({
                     quality: q,
-                    stream: `https://workers.dev/?url=${encodeURIComponent(stream)}`,
+                    stream: `https://workers.dev/?url=${encodeURIComponent(stream || iframe)}`,
                     iframe: iframe,
                     download:
                         data?.["Kiwi-Stream"]?.dub?.download?.[key] || null,
