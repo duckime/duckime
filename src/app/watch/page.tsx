@@ -209,25 +209,15 @@ function WatchContent() {
           </select>
         )}
 
-        <button
+        <a
           className={`nav-btn${downloadHref ? "" : " disabled"}`}
-          disabled={!downloadHref}
-          onClick={() => {
-            const video = videoRef.current;
-            const src = video?.currentSrc || video?.src || downloadHref;
-
-            if (!src) return;
-
-            const a = document.createElement("a");
-            a.href = src;
-            a.download = `${animeName || "episode"}-ep-${epNum}.mp4`;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-          }}
+          href={downloadHref || "#"}
+          target={downloadHref ? "_blank" : undefined}
+          rel={downloadHref ? "noreferrer" : undefined}
+          aria-disabled={!downloadHref}
         >
           {downloadLabel}
-        </button>
+        </a>
 
         <div className="nav-btns">
           {prevEp
