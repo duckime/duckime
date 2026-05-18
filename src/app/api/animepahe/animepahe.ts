@@ -163,188 +163,81 @@ export class Animepahe {
 
     // ── Streams ────────────────────────────────────────────────────────────
 
-    static async *streams(
-        animeId: string,
-        episodeSession: string,
-    ): AsyncGenerator<StreamResult> {
-        try {
-            const [animeName, res] = await Promise.all([
-                this.getAnimeName(animeId).catch(() => "Anime"),
-                fetch(`${ANIMEPAHE_BASE_URL}/play/${animeId}/${episodeSession}`, {
-                    headers: this.headers(),
-                })
-            ]);
+static async *streams(
+    animeId: string,
+    episodeSession: string,
+): AsyncGenerator<StreamResult> {
+    try {
+        const [animeName, res] = await Promise.all([
+            this.getAnimeName(animeId).catch(() => "Anime"),
+            fetch(`${ANIMEPAHE_BASE_URL}/play/${animeId}/${episodeSession}`, {
+                headers: this.headers(),
+            }),
+        ]);
 
-            const animeTitle = animeName;
-            const html = await res.text();
-            const $ = cheerio.load(html);
+        const animeTitle = animeName;
+        const html = await res.text();
+        const $ = cheerio.load(html);
 
-            // Try multiple selectors to find all quality/resolution buttons
-            let buttons: any[] = [];
-            const foundSelectors: string[] = [];
+        const buttons = $("div#resolutionMenu > button").toArray();
+        const downloadLinks = $("div#pickDownload > a").toArray();
 
-            // Primary selector - most specific
-            const primaryButtons = $("div#resolutionMenu > button").toArray();
-            if (primaryButtons.length > 0) {
-                buttons = primaryButtons;
-                foundSelectors.push("div#resolutionMenu > button");
+        console.log(`Found ${buttons.length} quality buttons`);
+
+        for (let i = 0; i < buttons.length; i++) {
+            const btn = $(buttons[i]);
+
+            const kwikLink = btn.attr("data-src") ?? "";
+            const audio = btn.attr("data-audio") ?? "unknown";
+
+            let displayQuality =
+                btn.attr("data-resolution") ??
+                btn.text().match(/(\d{3,4})[pP]/)?.[1] ??
+                "";
+
+            if (!kwikLink || !displayQuality) continue;
+
+            const paheWinLink =
+                downloadLinks[i]
+                    ? $(downloadLinks[i]).attr("href") ?? ""
+                    : "";
+
+            let directUrl: string | null = null;
+
+            try {
+                directUrl = await this.extractDirectUrl(kwikLink, paheWinLink);
+            } catch {
+                directUrl = null;
             }
 
-            // Also check for buttons with data attributes anywhere in the page
-            const dataResolutionButtons = $("button[data-resolution]").toArray();
-            const dataSrcButtons = $("button[data-src]").toArray();
-            const menuButtons = $("[id*='resolution'] button, [id*='quality'] button, .resolution-menu button").toArray();
-            const allButtons = $("button").toArray();
+            if (!directUrl) continue;
 
-            // Merge all unique buttons (by data-src value)
-            const seenSrcs = new Set<string>();
+            const downloadUrl =
+                this.generateDownloadUrl(
+                    directUrl,
+                    animeTitle,
+                    i + 1,
+                    audio,
+                    displayQuality,
+                ) || paheWinLink || null;
 
-            // Add primary buttons first
-            for (const btn of buttons) {
-                const src = $(btn).attr("data-src");
-                if (src && !seenSrcs.has(src)) {
-                    seenSrcs.add(src);
-                }
-            }
-
-            // Add from data-resolution buttons
-            for (const btn of dataResolutionButtons) {
-                const src = $(btn).attr("data-src");
-                if (src && !seenSrcs.has(src)) {
-                    buttons.push(btn);
-                    seenSrcs.add(src);
-                    if (!foundSelectors.includes("button[data-resolution]")) {
-                        foundSelectors.push("button[data-resolution]");
-                    }
-                }
-            }
-
-            // Add from data-src buttons
-            for (const btn of dataSrcButtons) {
-                const src = $(btn).attr("data-src");
-                if (src && !seenSrcs.has(src)) {
-                    buttons.push(btn);
-                    seenSrcs.add(src);
-                    if (!foundSelectors.includes("button[data-src]")) {
-                        foundSelectors.push("button[data-src]");
-                    }
-                }
-            }
-
-            // Add from menu buttons
-            for (const btn of menuButtons) {
-                const src = $(btn).attr("data-src");
-                if (src && !seenSrcs.has(src)) {
-                    buttons.push(btn);
-                    seenSrcs.add(src);
-                    if (!foundSelectors.includes("menu buttons")) {
-                        foundSelectors.push("menu buttons");
-                    }
-                }
-            }
-
-            // As a last resort, check all buttons for stream-related attributes
-            if (buttons.length === 0) {
-                for (const btn of allButtons) {
-                    const $btn = $(btn);
-                    const src = $btn.attr("data-src") || $btn.attr("href") || $btn.attr("data-link");
-                    const resolution = $btn.attr("data-resolution") || $btn.text().match(/(\d{3,4})[pP]/)?.[1];
-                    if (src && resolution) {
-                        buttons.push(btn);
-                    }
-                }
-            }
-
-            // Get download links with multiple selector attempts
-            let downloadLinks: any[] = [];
-            downloadLinks = $("div#pickDownload > a").toArray();
-            if (downloadLinks.length === 0) {
-                downloadLinks = $("a[href*='download'], a.download-link").toArray();
-            }
-
-            const corsHeaders = {
-                "Referer": "https://kwik.cx/",
+            yield {
+                id: `${animeId}--${displayQuality}--${audio}`,
+                title: `${audio} / ${displayQuality}p`,
+                url: kwikLink,
+                directUrl,
+                quality: displayQuality,
+                audio,
+                downloadUrl,
+                corsHeaders: {
+                    Referer: "https://kwik.cx/",
+                },
             };
-
-            // Try to find the episode number for the filename
-            const episodes = await this.fetchAllEpisodes(animeId).catch(() => []);
-            const episode = episodes.find(ep => ep.session === episodeSession);
-            const epNum = episode?.episode || "X";
-
-            // Debug: log what we found
-            console.log(`Found ${buttons.length} quality buttons for episode ${epNum} via: ${foundSelectors.join(", ")}`);
-
-            // Sort buttons by quality (highest first) for better prioritization
-            buttons.sort((a, b) => {
-                const qualityA = parseInt($(a).attr("data-resolution") || "0") || 0;
-                const qualityB = parseInt($(b).attr("data-resolution") || "0") || 0;
-                return qualityB - qualityA;
-            });
-
-            for (let i = 0; i < buttons.length; i++) {
-                const btn = $(buttons[i]);
-                const audio = btn.attr("data-audio") ?? "unknown";
-                const kwikLink = btn.attr("data-src") ?? "";
-                const quality = btn.attr("data-resolution") ?? "unknown";
-
-                // If quality is still unknown, try to extract from button text
-                let displayQuality = quality;
-                if (displayQuality === "unknown") {
-                    const btnText = btn.text().trim();
-                    const qualityMatch = btnText.match(/(\d{3,4})[pP]/);
-                    if (qualityMatch) {
-                        displayQuality = qualityMatch[1];
-                    }
-                }
-
-                // Skip if we still don't have a valid quality
-                if (displayQuality === "unknown" || displayQuality === "") {
-                    console.log(`Skipping button ${i}: no quality found`);
-                    continue;
-                }
-
-                // Only return 1080p quality
-                if (displayQuality !== "1080") {
-                    console.log(`Skipping quality ${displayQuality}: only 1080p is returned`);
-                    continue;
-                }
-
-                const paheWinLink = downloadLinks[i] ? $(downloadLinks[i]).attr("href") ?? "" : "";
-
-                if (kwikLink) {
-                    try {
-                        const directUrl = await this.extractDirectUrl(kwikLink, paheWinLink);
-                        if (!directUrl) continue;
-
-                        const downloadUrl = this.generateDownloadUrl(
-                            directUrl,
-                            animeTitle,
-                            epNum,
-                            audio,
-                            displayQuality
-                        ) || paheWinLink || null;
-
-                        yield {
-                            id: `${animeId}--${displayQuality}--${audio}`,
-                            title: `${audio} / ${displayQuality}p`,
-                            url: kwikLink,
-                            directUrl,
-                            quality: displayQuality,
-                            audio,
-                            downloadUrl,
-                            corsHeaders
-                        };
-                    } catch (error) {
-                        console.error(`Error extracting stream for quality ${displayQuality}:`, error);
-                        // Continue to next quality
-                    }
-                }
-            }
-        } catch (error) {
-            console.error("Error in streams generator:", error);
-            // Silently handle streams errors
         }
+    } catch (error) {
+        console.error("streams() failed:", error);
     }
+}
 
     // ── Get Name (lightweight) ──────────────────────────────────────────
 
