@@ -75,28 +75,39 @@ export async function GET(request: Request) {
       totalStreams: 0,
     };
 
-    for await (const result of Animepahe.streams(id, session)) {
-      const stream = {
-        id: result.id,
-        title: result.title,
-        m3u8Url: result.directUrl
-          ? `https://valt-top-proxy.vercel.app/m3u8-proxy?url=${encodeURIComponent(result.directUrl)}`
-          : null,
-        downloadUrl: result.downloadUrl ?? null,
-      };
+    try {
+      // Set a total timeout of 25 seconds to avoid Vercel's 30-second limit
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-      // 🎯 Detect audio type
-      const audio = (result.audio || "").toLowerCase();
+      const generator = Animepahe.streams(id, session);
+      
+      for await (const result of generator) {
+        if (!result.directUrl) continue;
+        
+        const stream = {
+          id: result.id,
+          title: result.title,
+          // Route through our own proxy to avoid CORS issues
+          m3u8Url: `/api/proxy?url=${encodeURIComponent(result.directUrl)}`,
+          downloadUrl: result.downloadUrl ?? null,
+        };
 
-      if (audio.includes("eng")) {
-        response.dub.push(stream);
-      } else {
-        response.sub.push(stream);
+        const audio = (result.audio || "").toLowerCase();
+
+        if (audio.includes("eng")) {
+          response.dub.push(stream);
+        } else {
+          response.sub.push(stream);
+        }
       }
+
+      clearTimeout(timeoutId);
+    } catch (error) {
+      console.error("Episode route error:", error);
     }
 
     response.totalStreams = response.sub.length + response.dub.length;
-
     return NextResponse.json(response, { status: 200 });
   }
 

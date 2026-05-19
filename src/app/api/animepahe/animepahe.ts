@@ -195,7 +195,10 @@ static async *streams(
                 btn.text().match(/(\d{3,4})[pP]/)?.[1] ??
                 "";
 
-            if (!kwikLink || !displayQuality) continue;
+            if (!kwikLink || !displayQuality) {
+                console.log(`Skipping button ${i}: missing kwikLink or quality`);
+                continue;
+            }
 
             const paheWinLink =
                 downloadLinks[i]
@@ -205,12 +208,18 @@ static async *streams(
             let directUrl: string | null = null;
 
             try {
+                console.log(`Extracting stream ${i + 1}/${buttons.length}...`);
                 directUrl = await this.extractDirectUrl(kwikLink, paheWinLink);
-            } catch {
+                console.log(`Stream ${i + 1}: ${directUrl ? "SUCCESS" : "FAILED"}`);
+            } catch (error) {
+                console.error(`Error extracting stream ${i + 1}:`, error);
                 directUrl = null;
             }
 
-            if (!directUrl) continue;
+            if (!directUrl) {
+                console.log(`Skipping stream ${i + 1}: no direct URL`);
+                continue;
+            }
 
             const downloadUrl =
                 this.generateDownloadUrl(
@@ -442,17 +451,38 @@ static async *streams(
     }
 
     private static async extractDirectUrl(kwikLink: string, paheWinLink?: string): Promise<string | null> {
-        try {
-            return await this.extractDirect(kwikLink);
-        } catch {
+        // Vercel has 30-second timeout, so we need to be aggressive
+        const timeout = 7000; // 7 second limit per stream
+        
+        const extractPromise = (async (): Promise<string | null> => {
+            try {
+                const directUrl = await this.extractDirect(kwikLink);
+                if (directUrl) return directUrl;
+            } catch (error) {
+                console.log("extractDirect failed, trying HLS...", error);
+            }
+            
+            // If direct extraction fails, try HLS as fallback
             if (paheWinLink) {
                 try {
-                    const res = await fetch(kwikLink, { headers: this.headers() });
+                    const res = await fetch(kwikLink, { 
+                        headers: this.headers(),
+                        signal: AbortSignal.timeout(4000)
+                    });
                     return await this.extractHls(paheWinLink, res);
-                } catch {
-                    // HLS extraction also failed
+                } catch (error) {
+                    console.log("extractHls failed:", error);
                 }
             }
+            return null;
+        })();
+
+        try {
+            return await Promise.race([
+                extractPromise,
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), timeout))
+            ]);
+        } catch {
             return null;
         }
     }
