@@ -1,10 +1,5 @@
 {
   "version": 2,
-  "functions": {
-    "src/app/api/**/*.ts": {
-      "maxDuration": 29
-    }
-  },
   "headers": [
     {
       "source": "/api/(.*)",
