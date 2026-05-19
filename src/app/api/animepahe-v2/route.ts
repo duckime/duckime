@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ConsumetAPI } from "./consumet";
+import { ConsumetAPI } from "../consumet";
 
 export const revalidate = 60;
 
